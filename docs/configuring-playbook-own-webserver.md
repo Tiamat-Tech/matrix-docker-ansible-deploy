@@ -1,49 +1,69 @@
-# Using your own webserver, instead of this playbook's nginx proxy (optional, advanced)
+# Using your own webserver, instead of this playbook's Traefik reverse-proxy (optional, advanced)
 
-**Note**: the playbook is [in the process of moving to Traefik](../CHANGELOG.md#reverse-proxy-configuration-changes-and-initial-traefik-support). The **documentation below may be incomplete or misleading**.
-
-By default, this playbook installs its own nginx webserver (called `matrix-nginx-proxy`, in a Docker container) which listens on ports 80 and 443.
-If that's alright, you can skip this.
-
-Soon, this default will change and the playbook will install its own [Traefik](https://traefik.io/) reverse-proxy instead.
+By default, this playbook installs its own [Traefik](https://traefik.io/) reverse-proxy server (in a Docker container) which listens on ports 80 and 443. If that's okay, you can skip this document.
 
 ## Traefik
 
-[Traefik](https://traefik.io/) will be the default reverse-proxy for the playbook in the near future.
+[Traefik](https://traefik.io/) is the default reverse-proxy for the playbook since [2023-02-26](../CHANGELOG.md/#2023-02-26) and serves **2 purposes**:
+
+- serving public traffic and providing SSL-termination with certificates obtained from [Let's Encrypt](https://letsencrypt.org/). See [Adjusting SSL certificate retrieval](./configuring-playbook-ssl-certificates.md).
+
+- assists internal communication between addon services (briges, bots, etc.) and the homeserver via an internal entrypoint (`matrix-internal-matrix-client-api`).
 
 There are 2 ways to use Traefik with this playbook, as described below.
 
 ### Traefik managed by the playbook
 
-To switch to Traefik now, use configuration like this:
+To have the playbook install and use Traefik, add the following configuration to your `inventory/host_vars/matrix.example.com/vars.yml` file:
 
 ```yaml
 matrix_playbook_reverse_proxy_type: playbook-managed-traefik
 
-devture_traefik_config_certificatesResolvers_acme_email: YOUR_EMAIL_ADDRESS
+traefik_config_certificatesResolvers_acme_email: YOUR_EMAIL_ADDRESS
 ```
 
-This will install Traefik in the place of `matrix-nginx-proxy`. Traefik will manage SSL certificates for all services seamlessly.
-
-**Note**: during the transition period, `matrix-nginx-proxy` will still be installed in local-only mode. Do not be alarmed to see `matrix-nginx-proxy` running even when you've chosen Traefik as your reverse-proxy. In the future, we'll be able to run without nginx, but we're not there yet.
+Traefik will manage SSL certificates for all services seamlessly.
 
 ### Traefik managed by you
 
 ```yaml
 matrix_playbook_reverse_proxy_type: other-traefik-container
 
-matrix_playbook_reverse_proxyable_services_additional_network: your-traefik-network
+# Uncomment and adjust this part if your Traefik container is on another network
+# matrix_playbook_reverse_proxy_container_network: traefik
+
+# Adjust to point to your Traefik container
+matrix_playbook_reverse_proxy_hostname: name-of-your-traefik-container
+
+traefik_certs_dumper_ssl_dir_path: "/path/to/your/traefiks/acme.json/directory"
+
+# Uncomment and adjust the variable below if the name of your federation entrypoint is different
+# than the default value (matrix-federation).
+# matrix_federation_traefik_entrypoint_name: matrix-federation
+
+# Uncomment and adjust the variables below if you'd like to enable HTTP-compression.
+#
+# For this to work, you will need to define a compress middleware (https://doc.traefik.io/traefik/middlewares/http/compress/) for your Traefik instance
+# using a file (https://doc.traefik.io/traefik/providers/file/) or Docker (https://doc.traefik.io/traefik/providers/docker/) configuration provider.
+#
+# matrix_playbook_reverse_proxy_traefik_middleware_compression_enabled: true
+# matrix_playbook_reverse_proxy_traefik_middleware_compression_name: my-compression-middleware@file
 ```
 
 In this mode all roles will still have Traefik labels attached. You will, however, need to configure your Traefik instance and its entrypoints.
 
-By default, the playbook congiures services use a `web-secure` (443) and `matrix-federation` (8448) entrypoints, as well as a `default` certificate resolver.
+By default, the playbook configured a `default` certificate resolver and multiple entrypoints.
 
-You need to configure 3 entrypoints for your Traefik server: `web` (TCP port `80`), `web-secure` (TCP port `443`) and `matrix-federation` (TCP port `8448`).
+You need to configure 4 entrypoints for your Traefik server:
+
+- `web` (TCP port `80`) - used for redirecting to HTTPS (`web-secure`)
+- `web-secure` (TCP port `443`) - used for exposing the Matrix Client-Server API and all other services
+- `matrix-federation` (TCP port `8448`) - used for exposing the Matrix Federation API
+- `matrix-internal-matrix-client-api` (TCP port `8008`) - used internally for addon services (bridges, bots) to communicate with the homserver
 
 Below is some configuration for running Traefik yourself, although we recommend using [Traefik managed by the playbook](#traefik-managed-by-the-playbook).
 
-Note that this configuration on its own does **not** redirect traffic on port 80 (plain HTTP) to port 443 for HTTPS, which may cause some issues, since the built-in Nginx proxy usually does this. If you are not already doing this in Traefik, it can be added to Traefik in a [file provider](https://docs.traefik.io/v2.0/providers/file/) as follows:
+Note that this configuration on its own does **not** redirect traffic on port 80 (plain HTTP) to port 443 for HTTPS. If you are not already doing this in Traefik, it can be added to Traefik in a [file provider](https://docs.traefik.io/v2.0/providers/file/) as follows:
 
 ```toml
 [http]
@@ -71,7 +91,7 @@ version: "3.3"
 services:
 
   traefik:
-    image: "docker.io/traefik:v2.9.6"
+    image: "docker.io/traefik:v3.2.0"
     restart: always
     container_name: "traefik"
     networks:
@@ -82,7 +102,8 @@ services:
       - "--providers.docker.network=traefik"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web-secure.address=:443"
-      - "--entrypoints.federation.address=:8448"
+      - "--entrypoints.matrix-federation.address=:8448"
+      - "--entrypoints.matrix-internal-matrix-client-api.address=:8008"
       - "--certificatesresolvers.default.acme.tlschallenge=true"
       - "--certificatesresolvers.default.acme.email=YOUR EMAIL"
       - "--certificatesresolvers.default.acme.storage=/letsencrypt/acme.json"
@@ -100,121 +121,90 @@ networks:
 
 ## Another webserver
 
-If you don't wish to use Traefik or `matrix-nginx-proxy`, you can also use your own webserver.
+If you don't wish to use Traefik, you can also use your own webserver.
 
 Doing this is possible, but requires manual work.
 
 There are 2 ways to go about it:
 
-- (recommended) [Fronting the integrated reverse-proxy webserver with another reverse-proxy](#fronting-the-integrated-reverse-proxy-webserver-with-another-reverse-proxy) - using a playbook-managed reverse-proxy (either `matrix-nginx-proxy` or Traefik), disabling SSL termination for it, exposing this reverse-proxy on a few local ports (e.g. `127.0.0.1:81`, etc.) and forwarding traffic from your own webserver to those few ports
+- (recommended) [Fronting the integrated reverse-proxy webserver with another reverse-proxy](#fronting-the-integrated-reverse-proxy-webserver-with-another-reverse-proxy) - using the playbook-managed reverse-proxy (Traefik), but disabling SSL termination for it, exposing this reverse-proxy on a few local ports (e.g. `127.0.0.1:81`, etc.) and forwarding traffic from your own webserver to those few ports
 
-- (difficult) [Using no reverse-proxy on the Matrix side at all](#using-no-reverse-proxy-on-the-matrix-side-at-all) disabling all playbook-managed reverse-proxies (no `matrix-nginx-proxy`, no Traefik)
-
+- (difficult) [Using no reverse-proxy on the Matrix side at all](#using-no-reverse-proxy-on-the-matrix-side-at-all) disabling the playbook-managed reverse-proxy (Traefik), exposing services one by one using `_host_bind_port` variables and forwarding traffic from your own webserver to those ports
 
 ### Fronting the integrated reverse-proxy webserver with another reverse-proxy
 
 This method is about leaving the integrated reverse-proxy webserver be, but making it not get in the way (using up important ports, trying to retrieve SSL certificates, etc.).
 
-If you wish to use another webserver, the integrated nginx reverse-proxy webserver usually gets in the way because it attempts to fetch SSL certificates and binds to ports 80, 443 and 8448 (if Matrix Federation is enabled).
+If you wish to use another webserver, the integrated reverse-proxy webserver usually gets in the way because it attempts to fetch SSL certificates and binds to ports 80, 443 and 8448 (if Matrix Federation is enabled).
 
-You can disable such behavior and make the integrated reverse-proxy webserver only serve traffic locally (or over a local network).
+You can disable such behavior and make the integrated reverse-proxy webserver only serve traffic locally on the host itself (or over a local network).
 
-This is the recommended way for using another reverse-proxy, because the integrated one would act as a black box and wire all Matrix services correctly. You would only need to reverse-proxy a few individual domains and ports over to it.
+This is the recommended way for using another reverse-proxy, because the integrated one would act as a black box and wire all Matrix services correctly. You would then only need to reverse-proxy a few individual domains and ports over to it.
 
-**For `matrix-nginx-proxy`** fronted by another reverse-proxy, you would need some configuration like this:
-
-```yaml
-# playbook-managed-proxy is the default right now, so we can keep this commented out.
-# matrix_playbook_reverse_proxy_type: playbook-managed-nginx
-
-# Disable SSL certificate retrieval
-matrix_ssl_retrieval_method: none
-
-# Given that we won't be obtaining SSL certificates here, disable HTTPS
-matrix_nginx_proxy_https_enabled: false
-
-# Do not listen for HTTP on port 80 globally (default), listen on the loopback interface.
-# If you'd like, you can make it use the local network as well and reverse-proxy from another local machine.
-matrix_nginx_proxy_container_http_host_bind_port: '127.0.0.1:81'
-
-# Likewise, expose the Matrix Federation port on the loopback interface.
-# Since `matrix_nginx_proxy_https_enabled` is set to `false`, this federation port will serve HTTP traffic.
-# If you'd like, you can make it use the local network as well and reverse-proxy from another local machine.
-#
-# You'd most likely need to expose it publicly on port 8448 (8449 was chosen for the local port to prevent overlap).
-matrix_nginx_proxy_container_federation_host_bind_port: '127.0.0.1:8449'
-```
-
-**For Traefik** fronted by another reverse-proxy, you would need some configuration like this:
+To front Traefik with another reverse-proxy, you would need some configuration like this:
 
 ```yaml
 matrix_playbook_reverse_proxy_type: playbook-managed-traefik
 
-# Disable the web-secure (port 443) endpoint, which also disables SSL certificate retrieval
-devture_traefik_config_entrypoint_web_secure_enabled: false
+# Ensure that public urls use https
+matrix_playbook_ssl_enabled: true
 
-devture_traefik_container_web_host_bind_port: '127.0.0.1:81'
+# Disable the web-secure (port 443) endpoint, which also disables SSL certificate retrieval.
+# This has the side-effect of also automatically disabling TLS for the matrix-federation entrypoint
+# (by toggling `matrix_federation_traefik_entrypoint_tls`).
+traefik_config_entrypoint_web_secure_enabled: false
 
-devture_traefik_additional_entrypoints_auto:
-  - name: matrix-federation
-    port: "{{ matrix_federation_public_port }}"
-    host_bind_port: "127.0.0.1:{{ matrix_federation_public_port }}"
-    config: {}
+# If your reverse-proxy runs on another machine, consider using `0.0.0.0:81`, just `81` or `SOME_IP_ADDRESS_OF_THIS_MACHINE:81`
+traefik_container_web_host_bind_port: '127.0.0.1:81'
+
+# We bind to `127.0.0.1` by default (see above), so trusting `X-Forwarded-*` headers from
+# a reverse-proxy running on the local machine is safe enough.
+# If you're publishing the port (`traefik_container_web_host_bind_port` above) to a public network interface:
+# - remove the `traefik_config_entrypoint_web_forwardedHeaders_insecure` variable definition below
+# - uncomment and adjust the `traefik_config_entrypoint_web_forwardedHeaders_trustedIPs` line below
+traefik_config_entrypoint_web_forwardedHeaders_insecure: true
+# traefik_config_entrypoint_web_forwardedHeaders_trustedIPs: ['IP-ADDRESS-OF-YOUR-REVERSE-PROXY']
+
+# Expose the federation entrypoint on a custom port (other than port 8448, which is normally used publicly).
+#
+# We bind to `127.0.0.1` by default (see above), so trusting `X-Forwarded-*` headers from
+# a reverse-proxy running on the local machine is safe enough.
+#
+# If your reverse-proxy runs on another machine, consider:
+# - using `0.0.0.0:8449`, just `8449` or `SOME_IP_ADDRESS_OF_THIS_MACHINE:8449` below
+# - adjusting `matrix_playbook_public_matrix_federation_api_traefik_entrypoint_config_custom` (below) - removing `insecure: true` and enabling/configuring `trustedIPs`
+matrix_playbook_public_matrix_federation_api_traefik_entrypoint_host_bind_port: '127.0.0.1:8449'
+
+# Disable HTTP/3 for the federation entrypoint.
+# If you'd like HTTP/3, consider configuring it for your other reverse-proxy.
+#
+# Disabling this also sets `matrix_playbook_public_matrix_federation_api_traefik_entrypoint_host_bind_port_udp` to an empty value.
+# If you'd like to keep HTTP/3 enabled here (for whatever reason), you may wish to explicitly
+# set `matrix_playbook_public_matrix_federation_api_traefik_entrypoint_host_bind_port_udp` to something like '127.0.0.1:8449'.
+matrix_playbook_public_matrix_federation_api_traefik_entrypoint_config_http3_enabled: false
+
+# Depending on the value of `matrix_playbook_public_matrix_federation_api_traefik_entrypoint_host_bind_port` above,
+# this may need to be reconfigured. See the comments above.
+matrix_playbook_public_matrix_federation_api_traefik_entrypoint_config_custom:
+  forwardedHeaders:
+    insecure: true
+  # trustedIPs: ['IP-ADDRESS-OF-YOUR-REVERSE-PROXY']
 ```
 
-If you'll be fronting with a reverse-proxy that lives on another machine (not on the same one as Matrix), you need to replace `127.0.0.1` in the above configurations with `0.0.0.0` or another network interface.
+Such a configuration would expose all services on a local port `81` and Matrix Federation on a local port `8449`. Your reverse-proxy configuration needs to send traffic to these ports. [`examples/reverse-proxies`](../examples/reverse-proxies/) contains examples for various webservers such as Apache2, Caddy, HAproxy, nginx and Nginx Proxy Manager.
+
+It's important that these webservers proxy-pass requests to the correct `ip:port` and also set the `Host` HTTP header appropriately. If you don't pass the `Host` header correctly, Traefik will return a `404 - not found` error.
+
+To put it another way:
+- `curl http://127.0.0.1:81` will result in a `404 - not found` error
+- but `curl -H 'Host: matrix.example.com' http://127.0.0.1:81` should work.
 
 ### Using no reverse-proxy on the Matrix side at all
 
-Instead of [Fronting the integrated reverse-proxy webserver with another reverse-proxy](#fronting-the-integrated-reverse-proxy-webserver-with-another-reverse-proxy), you can also go another way -- completely disabling the playbook-managed reverse-proxy. You would then need to reverse-proxy from your own webserver directly to Matrix services.
+Instead of [Fronting the integrated reverse-proxy webserver with another reverse-proxy](#fronting-the-integrated-reverse-proxy-webserver-with-another-reverse-proxy), you can also go another way -- completely disabling the playbook-managed Traefik reverse-proxy. You would then need to reverse-proxy from your own webserver directly to each individual Matrix service.
 
 This is more difficult, as you would need to handle the configuration for each service manually. Enabling additional services would come with extra manual work you need to do.
 
-If your webserver is on the same machine, sure your web server user (something like `http`, `apache`, `www-data`, `nginx`) is part of the `matrix` group. You should run something like this: `usermod -a -G matrix nginx`. This allows your webserver user to access files owned by the `matrix` group. When using an external nginx webserver, this allows it to read configuration files from `/matrix/nginx-proxy/conf.d`. When using another server, it would make other files, such as `/matrix/static-files/.well-known`, accessible to it.
+Also, the Traefik reverse-proxy, besides fronting everything is also serving a 2nd purpose of allowing addons services to communicate with the Matrix homeserver thanks to its `matrix-internal-matrix-client-api` entrypoint (read more about it above). Disabling Traefik completely means the playbook would wire services to directly talk to the homeserver. This can work for basic setups, but not for more complex setups involving [matrix-media-repo](./configuring-playbook-matrix-media-repo.md), [matrix-corporal](./configuring-playbook-matrix-corporal.md) or other such services that need to "steal routes" from the homeserver.
 
-#### Using your own nginx reverse-proxy running on the same machine
-
-If you'll be using `nginx` running on the same machine (not in a container), you can make the playbook help you generate configuration for `nginx` with this configuration:
-
-```yaml
-matrix_playbook_reverse_proxy_type: other-nginx-non-container
-
-# If you will manage SSL certificates yourself, uncomment the line below
-# matrix_ssl_retrieval_method: none
-
-# If you're using an old nginx version, consider using a custom protocol list
-# (removing `TLSv1.3` that is enabled by default) to suit your nginx version.
-# matrix_nginx_proxy_ssl_protocols: "TLSv1.2"
-```
-
-You can most likely directly use the config files installed by this playbook at: `/matrix/nginx-proxy/conf.d`. Just include them in your own `nginx.conf` like this: `include /matrix/nginx-proxy/conf.d/*.conf;`
-
-#### Using your own reverse-proxy running on the same machine or elsewhere
-
-To reverse-proxy manually for each service, use configuration like this:
-
-```yaml
-# If your reverse-proxy runs on the same machine:
-matrix_playbook_reverse_proxy_type: other-on-same-host
-
-# Or, if it runs on another machine:
-# matrix_playbook_reverse_proxy_type: other-on-another-host
-
-# Or, optionally customize the network interface prefix (note the trailing `:` character).
-# For other-on-same-host, the interface defaults to `127.0.0.1:`.
-# For other-on-another-host, the interface defaults to `0.0.0.0:`.
-# matrix_playbook_service_host_bind_interface_prefix: '192.168.30.4:'
-```
-
-With this configuration, each service will be exposed on a custom port. Example:
-
-- Synapse will be exposed on port `8008`
-- [Grafana](configuring-playbook-prometheus-grafana.md) will be exposed on port `3000`
-- [synapse-admin](configuring-playbook-synapse-admin.md) will be exposed on port `8766`
-
-You can capture traffic for these services and forward it to their port.
-Some of these services are configured with certain default expecations with regard to hostname, path, etc., so it's not completely arbitrary where you can host them (unless you change the defaults).
-
-For each new playbook service that you enable, you'll need special handling.
-
-The [`examples/`](../examples/) directory contains examples for various servers: Caddy, Apache, HAproxy, etc.
+If your webserver is on the same machine, ensure your web server user (something like `http`, `apache`, `www-data`, `nginx`) is part of the `matrix` group. You should run something like this: `usermod -a -G matrix nginx`. This allows your webserver user to access files owned by the `matrix` group, so that it can serve static files from `/matrix/static-files`.

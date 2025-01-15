@@ -57,7 +57,9 @@
   register: hookshot_passkey_file
 
 - name: Generate hookshot passkey if it doesn't exist
-  ansible.builtin.shell: "{{ matrix_host_command_openssl }} genpkey -out {{ matrix_hookshot_base_path }}/passkey.pem -outform PEM -algorithm RSA -pkeyopt rsa_keygen_bits:4096"
+  ansible.builtin.shell:
+    cmd: "{{ matrix_host_command_openssl }} genpkey -out {{ matrix_hookshot_base_path }}/passkey.pem -outform PEM -algorithm RSA -pkeyopt rsa_keygen_bits:4096"
+    creates: "{{ matrix_hookshot_base_path }}/passkey.pem"
   become: true
   become_user: "{{ matrix_user_username }}"
   when: "not hookshot_passkey_file.stat.exists"
@@ -78,8 +80,8 @@
       --name={{ matrix_hookshot_container_url }}-validate
       --user={{ matrix_user_uid }}:{{ matrix_user_gid }}
       --cap-drop=ALL
-      -v {{ matrix_hookshot_base_path }}/config.yml:/config.yml
-      {{ matrix_hookshot_docker_image }} node Config/Config.js /config.yml
+      --mount type=bind,src={{ matrix_hookshot_base_path }}/config.yml,dst=/config.yml,ro
+      {{ matrix_hookshot_docker_image }} node config/Config.js /config.yml
   register: hookshot_config_validation_result
   changed_when: false
 
@@ -104,6 +106,23 @@
     owner: "{{ matrix_user_username }}"
     group: "{{ matrix_user_groupname }}"
   when: matrix_hookshot_github_enabled | bool and matrix_hookshot_github_private_key|length > 0
+
+- name: Ensure matrix-hookshot container network is created
+  community.general.docker_network:
+    enable_ipv6: "{{ devture_systemd_docker_base_ipv6_enabled }}"
+    name: "{{ matrix_hookshot_container_network }}"
+    driver: bridge
+    driver_options: "{{ devture_systemd_docker_base_container_networks_driver_options }}"
+
+- name: Ensure mautrix-hookshot support files installed
+  ansible.builtin.template:
+    src: "{{ role_path }}/templates/{{ item }}.j2"
+    dest: "{{ matrix_hookshot_base_path }}/{{ item }}"
+    mode: 0640
+    owner: "{{ matrix_user_username }}"
+    group: "{{ matrix_user_groupname }}"
+  with_items:
+    - labels
 
 - name: Ensure matrix-hookshot.service installed
   ansible.builtin.template:

@@ -30,9 +30,9 @@ modules: {{ matrix_synapse_modules|to_json }}
 #
 # The server_name name will appear at the end of usernames and room addresses
 # created on this server. For example if the server_name was example.com,
-# usernames on this server would be in the format @user:example.com
+# usernames on this server would be in the format @alice:example.com
 #
-# In most cases you should avoid using a matrix specific subdomain such as
+# In most cases you should avoid using a Matrix specific subdomain such as
 # matrix.example.com or synapse.example.com as the server_name for the same
 # reasons you wouldn't use user@email.example.com as your email address.
 # See https://matrix-org.github.io/synapse/latest/delegate.html
@@ -55,7 +55,7 @@ pid_file: /homeserver.pid
 #web_client_location: https://riot.example.com/
 
 # The public-facing base URL that clients use to access this Homeserver (not
-# including _matrix/...). This is the same URL a user might enter into the
+# including _matrix/…). This is the same URL a user might enter into the
 # 'Custom Homeserver URL' field on their client. If you use Synapse with a
 # reverse proxy, this should be the URL to reach Synapse via the proxy.
 # Otherwise, it should be the URL to reach Synapse's client HTTP listener (see
@@ -63,7 +63,7 @@ pid_file: /homeserver.pid
 #
 # Defaults to 'https://<server_name>/'.
 #
-public_baseurl: https://{{ matrix_server_fqn_matrix }}/
+public_baseurl: {{ matrix_synapse_public_baseurl | to_json }}
 
 # Uncomment the following to tell other servers to send federation traffic on
 # port 443.
@@ -140,6 +140,10 @@ allow_public_rooms_over_federation: {{ matrix_synapse_allow_public_rooms_over_fe
 # to "1".
 #
 default_room_version: {{ matrix_synapse_default_room_version|to_json }}
+
+# Set to true to automatically forget rooms for users when they leave them, either
+# normally or via a kick or ban. Defaults to false.
+forget_rooms_on_leave: {{ matrix_synapse_forget_rooms_on_leave | to_json }}
 
 # The GC threshold parameters to pass to `gc.set_threshold`, if defined
 #
@@ -289,7 +293,7 @@ listeners:
 {% endif %}
 
 {% if matrix_synapse_federation_port_enabled and matrix_synapse_tls_federation_listener_enabled %}
-  # TLS-enabled listener: for when matrix traffic is sent directly to synapse.
+  # TLS-enabled listener: for when Matrix traffic is sent directly to synapse.
   - port: {{ matrix_synapse_container_federation_api_tls_port|to_json }}
     tls: true
     bind_addresses: ['::']
@@ -301,7 +305,7 @@ listeners:
         compress: false
 {% endif %}
 
-  # Unsecure HTTP listener (Client API): for when matrix traffic passes through a reverse proxy
+  # Unsecure HTTP listener (Client API): for when Matrix traffic passes through a reverse proxy
   # that unwraps TLS.
   - port: {{ matrix_synapse_container_client_api_port|to_json }}
     tls: false
@@ -314,7 +318,7 @@ listeners:
         compress: false
 
 {% if matrix_synapse_federation_port_enabled %}
-  # Unsecure HTTP listener (Federation API): for when matrix traffic passes through a reverse proxy
+  # Unsecure HTTP listener (Federation API): for when Matrix traffic passes through a reverse proxy
   # that unwraps TLS.
   - port: {{ matrix_synapse_container_federation_api_plain_port|to_json }}
     tls: false
@@ -338,7 +342,7 @@ listeners:
 {% if matrix_synapse_workers_enabled %}
 
 {% if matrix_synapse_replication_listener_enabled %}
-  # c.f. https://github.com/matrix-org/synapse/tree/master/docs/workers.md
+  # c.f. https://github.com/element-hq/synapse/tree/master/docs/workers.md
   # HTTP replication: for the workers to send data to the main synapse process
   - port: {{ matrix_synapse_replication_http_port }}
     bind_addresses: ['0.0.0.0']
@@ -347,7 +351,7 @@ listeners:
       - names: [replication]
 {% endif %}
 
-# c.f. https://github.com/matrix-org/synapse/tree/master/contrib/systemd-with-workers/README.md
+# c.f. https://github.com/element-hq/synapse/tree/master/contrib/systemd-with-workers/README.md
 worker_app: synapse.app.homeserver
 daemonize: false
 {% endif %}
@@ -387,7 +391,7 @@ manhole_settings:
 
 # How to reach the server admin, used in ResourceLimitError
 #
-#admin_contact: 'mailto:admin@server.com'
+#admin_contact: 'mailto:admin@example.com'
 
 # Global blocking
 #
@@ -505,7 +509,12 @@ limit_remote_rooms:
 #
 #redaction_retention_period: 28d
 
-redaction_retention_period: {{ matrix_synapse_redaction_retention_period }}
+redaction_retention_period: {{ matrix_synapse_redaction_retention_period | to_json }}
+
+# How long to keep locally forgotten rooms before purging them from the DB.
+#
+#forgotten_room_retention_period: 28d
+forgotten_room_retention_period: {{ matrix_synapse_forgotten_room_retention_period | to_json }}
 
 # How long to track users' last seen time and IPs in the database.
 #
@@ -513,7 +522,7 @@ redaction_retention_period: {{ matrix_synapse_redaction_retention_period }}
 #
 #user_ips_max_age: 14d
 
-user_ips_max_age: {{ matrix_synapse_user_ips_max_age }}
+user_ips_max_age: {{ matrix_synapse_user_ips_max_age | to_json }}
 
 # Inhibits the /requestToken endpoints from returning an error that might leak
 # information about whether an e-mail address is in use or not on this
@@ -566,7 +575,7 @@ templates:
 # By default, no room is excluded.
 #
 #exclude_rooms_from_sync:
-#    - !foo:example.com
+#    - !qporfwt:example.com
 
 
 # Message retention policy at the server level.
@@ -581,26 +590,37 @@ templates:
 # purged are ignored and not stored again.
 #
 retention:
+  {% if matrix_synapse_retention_enabled %}
   # The message retention policies feature is disabled by default. Uncomment the
   # following line to enable it.
   #
-  #enabled: true
+  enabled: {{ matrix_synapse_retention_enabled|to_json }}
 
   # Default retention policy. If set, Synapse will apply it to rooms that lack the
   # 'm.room.retention' state event. Currently, the value of 'min_lifetime' doesn't
   # matter much because Synapse doesn't take it into account yet.
   #
-  #default_policy:
-  #  min_lifetime: 1d
-  #  max_lifetime: 1y
+  {% if matrix_synapse_retention_default_policy_min_lifetime | length > 0 or matrix_synapse_retention_default_policy_max_lifetime | length > 0 %}
+  default_policy:
+  {% if matrix_synapse_retention_default_policy_min_lifetime | length > 0 %}
+    min_lifetime: {{ matrix_synapse_retention_default_policy_min_lifetime|to_json }}
+  {% endif %}
+  {% if matrix_synapse_retention_default_policy_max_lifetime | length > 0 %}
+    max_lifetime: {{ matrix_synapse_retention_default_policy_max_lifetime|to_json }}
+  {% endif %}
+  {% endif %}
 
   # Retention policy limits. If set, and the state of a room contains a
   # 'm.room.retention' event in its state which contains a 'min_lifetime' or a
   # 'max_lifetime' that's out of these bounds, Synapse will cap the room's policy
   # to these limits when running purge jobs.
   #
-  #allowed_lifetime_min: 1d
-  #allowed_lifetime_max: 1y
+  {% if matrix_synapse_retention_allowed_lifetime_min | length > 0 %}
+  allowed_lifetime_min: {{ matrix_synapse_retention_allowed_lifetime_min|to_json }}
+  {% endif %}
+  {% if matrix_synapse_retention_allowed_lifetime_max | length > 0 %}
+  allowed_lifetime_max: {{ matrix_synapse_retention_allowed_lifetime_max|to_json }}
+  {% endif %}
 
   # Server admins can define the settings of the background jobs purging the
   # events which lifetime has expired under the 'purge_jobs' section.
@@ -631,12 +651,8 @@ retention:
   # room's policy to these values is done after the policies are retrieved from
   # Synapse's database (which is done using the range specified in a purge job's
   # configuration).
-  #
-  #purge_jobs:
-  #  - longest_max_lifetime: 3d
-  #    interval: 12h
-  #  - shortest_max_lifetime: 3d
-  #    interval: 1d
+  purge_jobs: {{ matrix_synapse_retention_purge_jobs | to_json }}
+  {% endif %}
 
 
 ## TLS ##
@@ -682,7 +698,7 @@ tls_private_key_path: {{ matrix_synapse_tls_private_key_path|to_json }}
 #
 #federation_certificate_verification_whitelist:
 #  - lon.example.com
-#  - "*.domain.com"
+#  - "*.example.com"
 #  - "*.onion"
 
 # List of custom certificate authorities for federation traffic.
@@ -751,49 +767,48 @@ federation_domain_whitelist: {{ matrix_synapse_federation_domain_whitelist|to_js
 # The number of events to cache in memory. Not affected by
 # caches.global_factor.
 #
-event_cache_size: "{{ matrix_synapse_event_cache_size }}"
+event_cache_size: {{ matrix_synapse_event_cache_size | to_json }}
 
 caches:
-   # Controls the global cache factor, which is the default cache factor
-   # for all caches if a specific factor for that cache is not otherwise
-   # set.
-   #
-   # This can also be set by the "SYNAPSE_CACHE_FACTOR" environment
-   # variable. Setting by environment variable takes priority over
-   # setting through the config file.
-   #
-   # Defaults to 0.5, which will half the size of all caches.
-   #
-   global_factor: {{ matrix_synapse_caches_global_factor }}
-
-   # A dictionary of cache name to cache factor for that individual
-   # cache. Overrides the global cache factor for a given cache.
-   #
-   # These can also be set through environment variables comprised
-   # of "SYNAPSE_CACHE_FACTOR_" + the name of the cache in capital
-   # letters and underscores. Setting by environment variable
-   # takes priority over setting through the config file.
-   # Ex. SYNAPSE_CACHE_FACTOR_GET_USERS_WHO_SHARE_ROOM_WITH_USER=2.0
-   #
-   # Some caches have '*' and other characters that are not
-   # alphanumeric or underscores. These caches can be named with or
-   # without the special characters stripped. For example, to specify
-   # the cache factor for `*stateGroupCache*` via an environment
-   # variable would be `SYNAPSE_CACHE_FACTOR_STATEGROUPCACHE=2.0`.
-   #
-   per_cache_factors:
-     #get_users_who_share_room_with_user: 2.0
+  # Controls the global cache factor, which is the default cache factor
+  # for all caches if a specific factor for that cache is not otherwise
+  # set.
+  #
+  # This can also be set by the "SYNAPSE_CACHE_FACTOR" environment
+  # variable. Setting by environment variable takes priority over
+  # setting through the config file.
+  #
+  # Defaults to 0.5, which will half the size of all caches.
+  #
+  global_factor: {{ matrix_synapse_caches_global_factor | to_json }}
+  # A dictionary of cache name to cache factor for that individual
+  # cache. Overrides the global cache factor for a given cache.
+  #
+  # These can also be set through environment variables comprised
+  # of "SYNAPSE_CACHE_FACTOR_" + the name of the cache in capital
+  # letters and underscores. Setting by environment variable
+  # takes priority over setting through the config file.
+  # Ex. SYNAPSE_CACHE_FACTOR_GET_USERS_WHO_SHARE_ROOM_WITH_USER=2.0
+  #
+  # Some caches have '*' and other characters that are not
+  # alphanumeric or underscores. These caches can be named with or
+  # without the special characters stripped. For example, to specify
+  # the cache factor for `*stateGroupCache*` via an environment
+  # variable would be `SYNAPSE_CACHE_FACTOR_STATEGROUPCACHE=2.0`.
+  #
+  per_cache_factors:
+    #get_users_who_share_room_with_user: 2.0
 
   # Controls whether cache entries are evicted after a specified time
   # period. Defaults to true. Uncomment to disable this feature.
   #
-  #expire_caches: false
+  expire_caches: {{ matrix_synapse_caches_expire_caches | to_json }}
 
   # If expire_caches is enabled, this flag controls how long an entry can
   # be in a cache without having been accessed before being evicted.
   # Defaults to 30m. Uncomment to set a different time to live for cache entries.
   #
-  #cache_entry_ttl: 30m
+  cache_entry_ttl: {{ matrix_synapse_caches_cache_entry_ttl | to_json }}
 
   # Controls how long the results of a /sync request are cached for after
   # a successful response is returned. A higher duration can help clients with
@@ -802,7 +817,12 @@ caches:
   # By default, this is zero, which means that sync responses are not cached
   # at all.
   #
-  #sync_response_cache_duration: 2m
+  sync_response_cache_duration: {{ matrix_synapse_caches_sync_response_cache_duration | to_json }}
+
+  cache_autotuning:
+    max_cache_memory_usage: {{ ((matrix_synapse_cache_autotuning_max_cache_memory_usage | int | to_json) if matrix_synapse_cache_autotuning_max_cache_memory_usage else '') }}
+    target_cache_memory_usage: {{ ((matrix_synapse_cache_autotuning_target_cache_memory_usage | int | to_json) if matrix_synapse_cache_autotuning_target_cache_memory_usage else '') }}
+    min_cache_ttl: {{ matrix_synapse_cache_autotuning_min_cache_ttl | to_json }}
 
 
 ## Database ##
@@ -865,8 +885,8 @@ database:
     database: "{{ matrix_synapse_database_database }}"
     host: "{{ matrix_synapse_database_host }}"
     port: {{ matrix_synapse_database_port }}
-    cp_min: 5
-    cp_max: 10
+    cp_min: {{ matrix_synapse_database_cp_min | to_json }}
+    cp_max: {{ matrix_synapse_database_cp_max | to_json }}
 
 
 ## Logging ##
@@ -1014,6 +1034,13 @@ federation_rr_transactions_per_room_per_second: {{ matrix_synapse_federation_rr_
 #
 #enable_media_repo: false
 enable_media_repo: {{ matrix_synapse_enable_media_repo | to_json }}
+
+# Enable authenticated media.
+# enable_authenticated_media blocks access to new media from the legacy endpoints
+# and freezes the unauthenticated media repo by blocking all downloads that are not using
+# the new authenticated endpoints. If this option is turned off all media reverts to being considered "old"
+
+enable_authenticated_media: {{ matrix_synapse_enable_authenticated_media | to_json }}
 
 # Directory where uploaded images and attachments are stored.
 #
@@ -1215,6 +1242,7 @@ oembed:
   #
   #additional_providers:
   #  - oembed/my_providers.json
+  additional_providers: {{ matrix_synapse_oembed_additional_providers|to_json }}
 
 
 ## Captcha ##
@@ -1223,12 +1251,12 @@ oembed:
 # This homeserver's ReCAPTCHA public key. Must be specified if
 # enable_registration_captcha is enabled.
 #
-recaptcha_public_key: {{ matrix_synapse_recaptcha_public_key|to_json }}
+recaptcha_public_key: {{ matrix_synapse_recaptcha_public_key|string|to_json }}
 
 # This homeserver's ReCAPTCHA private key. Must be specified if
 # enable_registration_captcha is enabled.
 #
-recaptcha_private_key: {{ matrix_synapse_recaptcha_private_key|to_json }}
+recaptcha_private_key: {{ matrix_synapse_recaptcha_private_key|string|to_json }}
 
 # Uncomment to enable ReCaptcha checks when registering, preventing signup
 # unless a captcha is answered. Requires a valid ReCaptcha
@@ -1250,13 +1278,13 @@ turn_uris: {{ matrix_synapse_turn_uris|to_json }}
 
 # The shared secret used to compute passwords for the TURN server
 #
-turn_shared_secret: {{ matrix_synapse_turn_shared_secret | string|to_json }}
+turn_shared_secret: {{ matrix_synapse_turn_shared_secret | string | to_json }}
 
 # The Username and password if the TURN server needs them and
 # does not use a token
 #
-#turn_username: "TURNSERVER_USERNAME"
-#turn_password: "TURNSERVER_PASSWORD"
+turn_username: {{ matrix_synapse_turn_username | string  | to_json }}
+turn_password: {{ matrix_synapse_turn_password | string  | to_json }}
 
 # How long generated TURN credentials last
 #
@@ -1511,11 +1539,11 @@ autocreate_auto_join_rooms: {{ matrix_synapse_autocreate_auto_join_rooms|to_json
 #
 #autocreate_auto_join_room_preset: private_chat
 
-# The local part of the user id which is used to create auto_join_rooms if
+# The local part of the user ID which is used to create auto_join_rooms if
 # autocreate_auto_join_rooms is true. If this is not provided then the
 # initial user account that registers will be used to create the rooms.
 #
-# The user id is also used to invite new users to any auto-join rooms which
+# The user ID is also used to invite new users to any auto-join rooms which
 # are set to invite-only.
 #
 # It *must* be configured if autocreate_auto_join_room_preset is set to
@@ -1528,7 +1556,7 @@ autocreate_auto_join_rooms: {{ matrix_synapse_autocreate_auto_join_rooms|to_json
 # Note that, if the room already exists, this user must be joined and
 # have the appropriate permissions to invite new members.
 #
-#auto_join_mxid_localpart: system
+auto_join_mxid_localpart: {{ matrix_synapse_auto_join_mxid_localpart | to_json }}
 
 # When auto_join_rooms is specified, setting this flag to false prevents
 # guest accounts from being automatically joined to the rooms.
@@ -1536,6 +1564,12 @@ autocreate_auto_join_rooms: {{ matrix_synapse_autocreate_auto_join_rooms|to_json
 # Defaults to true.
 #
 #auto_join_rooms_for_guests: false
+
+auto_accept_invites:
+    enabled: {{ matrix_synapse_auto_accept_invites_enabled | to_json }}
+    only_for_direct_messages: {{ matrix_synapse_auto_accept_invites_only_for_direct_messages | to_json }}
+    only_from_local_users: {{ matrix_synapse_auto_accept_invites_only_from_local_users | to_json }}
+    worker_to_run_on: {{ matrix_synapse_auto_accept_invites_worker_to_run_on | to_json }}
 
 # Whether to inhibit errors raised when registering a new account if the user ID
 # already exists. If turned on, that requests to /register/available will always
@@ -1552,10 +1586,10 @@ autocreate_auto_join_rooms: {{ matrix_synapse_autocreate_auto_join_rooms|to_json
 
 # Enable collection and rendering of performance metrics
 #
-enable_metrics: {{ matrix_synapse_metrics_enabled|to_json  }}
+enable_metrics: {{ matrix_synapse_metrics_enabled|to_json }}
 
 # Enable sentry integration
-# NOTE: While attempts are made to ensure that the logs don't contain
+# Note: While attempts are made to ensure that the logs don't contain
 # any sensitive information, this cannot be guaranteed. By enabling
 # this option the sentry server may therefore receive sensitive
 # information, and it in turn may then diseminate sensitive information
@@ -1585,6 +1619,7 @@ report_stats: {{ matrix_synapse_report_stats|to_json }}
 #
 #report_stats_endpoint: https://example.com/report-usage-stats/push
 
+report_stats_endpoint: {{ matrix_synapse_report_stats_endpoint|to_json }}
 
 ## API Configuration ##
 
@@ -1701,7 +1736,7 @@ old_signing_keys:
 #
 #    server_name: the name of the server. required.
 #
-#    verify_keys: an optional map from key id to base64-encoded public key.
+#    verify_keys: an optional map from key ID to base64-encoded public key.
 #       If specified, we will check that the response is signed by at least
 #       one of the given keys.
 #
@@ -1846,7 +1881,7 @@ saml2_config:
   #saml_session_lifetime: 5m
 
   # An external module can be provided here as a custom solution to
-  # mapping attributes returned from a saml provider onto a matrix user.
+  # mapping attributes returned from a saml provider onto a Matrix user.
   #
   user_mapping_provider:
     # The custom module's class. Uncomment to use a custom module.
@@ -1869,7 +1904,7 @@ saml2_config:
       #mxid_source_attribute: displayName
 
       # The mapping system to use for mapping the saml attribute onto a
-      # matrix ID.
+      # Matrix ID.
       #
       # Options include:
       #  * 'hexencode' (which maps unpermitted characters to '=xx')
@@ -1935,7 +1970,7 @@ saml2_config:
 #
 #   idp_icon: An optional icon for this identity provider, which is presented
 #       by clients and Synapse's own IdP picker page. If given, must be an
-#       MXC URI of the format mxc://<server-name>/<media-id>. (An easy way to
+#       MXC URI of the format mxc://example.com/<media-id>. (An easy way to
 #       obtain such an MXC URI is to upload an image to an (unencrypted) room
 #       and then copy the "url" from the source of the event.)
 #
@@ -1949,7 +1984,7 @@ saml2_config:
 #   issuer: Required. The OIDC issuer. Used to validate tokens and (if discovery
 #       is enabled) to discover the provider's endpoints.
 #
-#   client_id: Required. oauth2 client id to use.
+#   client_id: Required. oauth2 client ID to use.
 #
 #   client_secret: oauth2 client secret to use. May be omitted if
 #        client_secret_jwt_key is given, or if client_auth_method is 'none'.
@@ -2010,7 +2045,7 @@ saml2_config:
 #       switching from password logins to OIDC. Defaults to false.
 #
 #   user_mapping_provider: Configuration for how attributes returned from a OIDC
-#       provider are mapped onto a matrix user. This setting has the following
+#       provider are mapped onto a Matrix user. This setting has the following
 #       sub-properties:
 #
 #       module: The class name of a custom mapping module. Default is
@@ -2081,9 +2116,9 @@ saml2_config:
 # use 'oidc' for the idp_id to ensure that existing users continue to be
 # recognised.)
 #
-oidc_providers:
+{% if matrix_synapse_oidc_enabled and matrix_synapse_oidc_providers | length > 0 %}
   # Generic example
-  #
+  #matrix_synapse_oidc_providers:
   #- idp_id: my_idp
   #  idp_name: "My OpenID provider"
   #  idp_icon: "mxc://example.com/mediaid"
@@ -2107,6 +2142,8 @@ oidc_providers:
   #  attribute_requirements:
   #    - attribute: userGroup
   #      value: "synapseUsers"
+oidc_providers: {{ matrix_synapse_oidc_providers }}
+{% endif %}
 
 
 # Enable Central Authentication Service (CAS) for registration and login.
@@ -2241,7 +2278,7 @@ sso:
 password_config:
    # Uncomment to disable password login
    #
-   #enabled: false
+   enabled: {{ matrix_synapse_password_config_enabled|to_json }}
 
    # Uncomment to disable authentication against the local password
    # database. This is ignored if `enabled` is false, and is only useful
@@ -2347,7 +2384,7 @@ email:
   # must present a certificate that is valid for 'smtp_host'. If this option
   # is set to false, TLS will not be used.
   #
-  #enable_tls: false
+  enable_tls: {{ matrix_synapse_email_smtp_enable_tls|to_json }}
 
   # notif_from defines the "From" address to use when sending emails.
   # It must be set if email sending is enabled.
@@ -2425,34 +2462,34 @@ email:
     #
     # Subject to use to notify about one message from one or more user(s) in a
     # room which has a name.
-    #message_from_person_in_room: "[%(app)s] You have a message on %(app)s from %(person)s in the %(room)s room..."
+    #message_from_person_in_room: "[%(app)s] You have a message on %(app)s from %(person)s in the %(room)s room…"
     #
     # Subject to use to notify about one message from one or more user(s) in a
     # room which doesn't have a name.
-    #message_from_person: "[%(app)s] You have a message on %(app)s from %(person)s..."
+    #message_from_person: "[%(app)s] You have a message on %(app)s from %(person)s…"
     #
     # Subject to use to notify about multiple messages from one or more users in
     # a room which doesn't have a name.
-    #messages_from_person: "[%(app)s] You have messages on %(app)s from %(person)s..."
+    #messages_from_person: "[%(app)s] You have messages on %(app)s from %(person)s…"
     #
     # Subject to use to notify about multiple messages in a room which has a
     # name.
-    #messages_in_room: "[%(app)s] You have messages on %(app)s in the %(room)s room..."
+    #messages_in_room: "[%(app)s] You have messages on %(app)s in the %(room)s room…"
     #
     # Subject to use to notify about multiple messages in multiple rooms.
-    #messages_in_room_and_others: "[%(app)s] You have messages on %(app)s in the %(room)s room and others..."
+    #messages_in_room_and_others: "[%(app)s] You have messages on %(app)s in the %(room)s room and others…"
     #
     # Subject to use to notify about multiple messages from multiple persons in
     # multiple rooms. This is similar to the setting above except it's used when
     # the room in which the notification was triggered has no name.
-    #messages_from_person_and_others: "[%(app)s] You have messages on %(app)s from %(person)s and others..."
+    #messages_from_person_and_others: "[%(app)s] You have messages on %(app)s from %(person)s and others…"
     #
     # Subject to use to notify about an invite to a room which has a name.
-    #invite_from_person_to_room: "[%(app)s] %(person)s has invited you to join the %(room)s room on %(app)s..."
+    #invite_from_person_to_room: "[%(app)s] %(person)s has invited you to join the %(room)s room on %(app)s…"
     #
     # Subject to use to notify about an invite to a room which doesn't have a
     # name.
-    #invite_from_person: "[%(app)s] %(person)s has invited you to chat on %(app)s..."
+    #invite_from_person: "[%(app)s] %(person)s has invited you to chat on %(app)s…"
 
     # Subject for emails related to account administration.
     #
@@ -2473,7 +2510,7 @@ email:
 # ex. LDAP, external tokens, etc.
 #
 # For more information and known implementations, please see
-# https://github.com/matrix-org/synapse/blob/master/docs/password_auth_providers.md
+# https://github.com/element-hq/synapse/blob/master/docs/password_auth_providers.md
 #
 # Note: instances wishing to use SAML or CAS authentication should
 # instead use the `saml2_config` or `cas_config` options,
@@ -2515,7 +2552,7 @@ password_providers:
     config:
       enabled: true
       mode: {{ matrix_synapse_ext_password_provider_ldap_mode | string | to_json }}
-      uri: {{ matrix_synapse_ext_password_provider_ldap_uri | string|to_json }}
+      uri: {{ matrix_synapse_ext_password_provider_ldap_uri | to_json }}
       start_tls: {{ matrix_synapse_ext_password_provider_ldap_start_tls|to_json }}
       base: {{ matrix_synapse_ext_password_provider_ldap_base | string|to_json }}
       active_directory: {{ matrix_synapse_ext_password_provider_ldap_active_directory|to_json }}
@@ -2566,20 +2603,6 @@ push:
   #group_unread_count_by_room: false
 
 
-# Spam checkers are third-party modules that can block specific actions
-# of local users, such as creating rooms and registering undesirable
-# usernames, as well as remote users by redacting incoming events.
-#
-# spam_checker:
-   #- module: "my_custom_project.SuperSpamChecker"
-   #  config:
-   #    example_option: 'things'
-   #- module: "some_other_project.BadEventStopper"
-   #  config:
-   #    example_stop_events_from: ['@bad:example.com']
-spam_checker: {{ matrix_synapse_spam_checker|to_json }}
-
-
 ## Rooms ##
 
 # Controls whether locally-created rooms should be end-to-end encrypted by
@@ -2626,7 +2649,7 @@ user_directory:
     # Uncomment to return search results containing all known users, even if that
     # user does not share a room with the requester.
     #
-    #search_all_users: true
+    search_all_users: {{ matrix_synapse_user_directory_search_all_users | to_json }}
 
     # Defines whether to prefer local users in search query results.
     # If True, local users are more likely to appear above remote users
@@ -2635,7 +2658,7 @@ user_directory:
     # Uncomment to prefer local over remote users in user directory search
     # results.
     #
-    #prefer_local_users: true
+    prefer_local_users: {{ matrix_synapse_user_directory_prefer_local_users | to_json }}
 
 
 # User Consent configuration
@@ -2705,10 +2728,10 @@ stats:
 #
 # Uncomment this section to enable a room which can be used to send notices
 # from the server to users. It is a special room which cannot be left; notices
-# come from a special "notices" user id.
+# come from a special "notices" user ID.
 #
 # If you uncomment this section, you *must* define the system_mxid_localpart
-# setting, which defines the id of the user which will be used to send the
+# setting, which defines the ID of the user which will be used to send the
 # notices.
 #
 # It's also possible to override the room name, the display name of the
@@ -2717,7 +2740,7 @@ stats:
 #server_notices:
 #  system_mxid_localpart: notices
 #  system_mxid_display_name: "Server Notices"
-#  system_mxid_avatar_url: "mxc://server.com/oumMVlgDnLYFaPVkExemNVVZ"
+#  system_mxid_avatar_url: "mxc://example.com/oumMVlgDnLYFaPVkExemNVVZ"
 #  room_name: "Server Notices"
 
 
@@ -2816,15 +2839,15 @@ opentracing:
     #homeserver_whitelist:
     #  - ".*"
 
-    # A list of the matrix IDs of users whose requests will always be traced,
+    # A list of the Matrix IDs of users whose requests will always be traced,
     # even if the tracing system would otherwise drop the traces due to
     # probabilistic sampling.
     #
     # By default, the list is empty.
     #
     #force_tracing_for_users:
-    #  - "@user1:server_name"
-    #  - "@user2:server_name"
+    #  - "@alice:server_name"
+    #  - "@bob:server_name"
 
     # Jaeger can be configured to sample traces at different rates.
     # All configuration options provided by Jaeger can be set here.
@@ -2920,6 +2943,9 @@ redis:
   host: {{ matrix_synapse_redis_host }}
   port: {{ matrix_synapse_redis_port }}
 
+  # Optional database ID to connect to. Defaults to 0.
+  dbid: {{ matrix_synapse_redis_dbid }}
+
   # Optional password if configured on the Redis instance
   #
   password: {{ matrix_synapse_redis_password }}
@@ -2956,5 +2982,20 @@ background_updates:
     #
     #default_batch_size: 50
 
+experimental_features:
+  {% if matrix_synapse_experimental_features_msc3861_enabled %}
+  msc3861:
+    enabled: true
+    issuer: {{ matrix_synapse_experimental_features_msc3861_issuer | to_json }}
+    introspection_endpoint: {{ matrix_synapse_experimental_features_msc3861_introspection_endpoint | to_json }}
+    client_id: {{ matrix_synapse_experimental_features_msc3861_client_id | to_json }}
+    client_auth_method: {{ matrix_synapse_experimental_features_msc3861_client_auth_method | to_json }}
+    client_secret: {{ matrix_synapse_experimental_features_msc3861_client_secret | to_json }}
+    admin_token: {{ matrix_synapse_experimental_features_msc3861_admin_token | to_json }}
+    account_management_url: {{ matrix_synapse_experimental_features_msc3861_account_management_url | to_json }}
+  {% endif %}
+  {% if matrix_synapse_experimental_features_msc4108_enabled %}
+  msc4108_enabled: true
+  {% endif %}
 
 # vim:ft=yaml

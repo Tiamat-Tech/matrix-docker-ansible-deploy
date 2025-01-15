@@ -1,29 +1,107 @@
 ---
-# buscarron is a helpdesk bot
-# Project source code URL: https://gitlab.com/etke.cc/buscarron
+
+# Buscarron is a Web forms (HTTP POST) to Matrix service.
+# Project source code URL: https://github.com/etkecc/buscarron
 
 matrix_bot_buscarron_enabled: true
 
-matrix_bot_buscarron_container_image_self_build: false
-matrix_bot_buscarron_docker_repo: "https://gitlab.com/etke.cc/buscarron.git"
-matrix_bot_buscarron_docker_repo_version: "{{ matrix_bot_buscarron_version }}"
-matrix_bot_buscarron_docker_src_files_path: "{{ matrix_base_data_path }}/buscarron/docker-src"
+# renovate: datasource=docker depName=ghcr.io/etkecc/buscarron
+matrix_bot_buscarron_version: v1.4.3
 
-matrix_bot_buscarron_version: v1.3.1
-matrix_bot_buscarron_docker_image: "{{ matrix_bot_buscarron_docker_image_name_prefix }}etke.cc/buscarron:{{ matrix_bot_buscarron_version }}"
-matrix_bot_buscarron_docker_image_name_prefix: "{{ 'localhost/' if matrix_bot_buscarron_container_image_self_build else 'registry.gitlab.com/' }}"
-matrix_bot_buscarron_docker_image_force_pull: "{{ matrix_bot_buscarron_docker_image.endswith(':latest') }}"
+# The hostname at which Buscarron is served.
+matrix_bot_buscarron_hostname: ''
+
+# The path at which Buscarron is exposed.
+# This value must either be `/` or not end with a slash (e.g. `/buscarron`).
+matrix_bot_buscarron_path_prefix: /
+
+# The path at which Buscarron will expose metrics
+# This value must either be `/` or not end with a slash (e.g. `/metrics`).
+matrix_bot_buscarron_metrics_path: /metrics
 
 matrix_bot_buscarron_base_path: "{{ matrix_base_data_path }}/buscarron"
 matrix_bot_buscarron_config_path: "{{ matrix_bot_buscarron_base_path }}/config"
 matrix_bot_buscarron_data_path: "{{ matrix_bot_buscarron_base_path }}/data"
 matrix_bot_buscarron_data_store_path: "{{ matrix_bot_buscarron_data_path }}/store"
 
+matrix_bot_buscarron_container_image_self_build: false
+matrix_bot_buscarron_docker_repo: "https://github.com/etkecc/buscarron.git"
+matrix_bot_buscarron_docker_repo_version: "{{ matrix_bot_buscarron_version }}"
+matrix_bot_buscarron_docker_src_files_path: "{{ matrix_base_data_path }}/buscarron/docker-src"
+
+matrix_bot_buscarron_docker_image: "{{ matrix_bot_buscarron_docker_image_name_prefix }}etkecc/buscarron:{{ matrix_bot_buscarron_version }}"
+matrix_bot_buscarron_docker_image_name_prefix: "{{ 'localhost/' if matrix_bot_buscarron_container_image_self_build else 'ghcr.io/' }}"
+matrix_bot_buscarron_docker_image_force_pull: "{{ matrix_bot_buscarron_docker_image.endswith(':latest') }}"
+
+# The base container network. It will be auto-created by this role if it doesn't exist already.
+matrix_bot_buscarron_container_network: matrix-bot-buscarron
+
+# A list of additional container networks that the container would be connected to.
+# The role does not create these networks, so make sure they already exist.
+# Use this to expose this container to another reverse proxy, which runs in a different container network.
+matrix_bot_buscarron_container_additional_networks: "{{ matrix_bot_buscarron_container_additional_networks_auto + matrix_bot_buscarron_container_additional_networks_custom }}"
+matrix_bot_buscarron_container_additional_networks_auto: []
+matrix_bot_buscarron_container_additional_networks_custom: []
+
+# /metrics login
+matrix_bot_buscarron_metrics_login: ''
+# /metrics password
+matrix_bot_buscarron_metrics_password: ''
+# /metrics allowed ips
+matrix_bot_buscarron_metrics_ips: []
+
+# healthchecks.io integration
+matrix_bot_buscarron_hc_url: ''  # default is https://hc-ping.com (healthchecks.io)
+matrix_bot_buscarron_hc_uuid: ''  # check UUID
+
+# redmine integration
+matrix_bot_buscarron_redmine_host: ''  # e.g. https://redmine.example.com
+matrix_bot_buscarron_redmine_apikey: ''
+matrix_bot_buscarron_redmine_project: ''  # project identifier (e.g., my-project)
+matrix_bot_buscarron_redmine_trackerid: ''  # task tracker ID (e.g., 1)
+matrix_bot_buscarron_redmine_statusid: ''  # task status ID (e.g., 1)
+
+
+# matrix_bot_buscarron_container_labels_traefik_enabled controls whether labels to assist a Traefik reverse-proxy will be attached to the container.
+# See `../templates/labels.j2` for details.
+#
+# To inject your own other container labels, see `matrix_bot_buscarron_container_labels_additional_labels`.
+matrix_bot_buscarron_container_labels_traefik_enabled: true
+matrix_bot_buscarron_container_labels_traefik_docker_network: "{{ matrix_bot_buscarron_container_network }}"
+matrix_bot_buscarron_container_labels_traefik_hostname: "{{ matrix_bot_buscarron_hostname }}"
+# The path prefix must either be `/` or not end with a slash (e.g. `/buscarron`).
+matrix_bot_buscarron_container_labels_traefik_path_prefix: "{{ matrix_bot_buscarron_path_prefix }}"
+matrix_bot_buscarron_container_labels_traefik_rule: "Host(`{{ matrix_bot_buscarron_container_labels_traefik_hostname }}`){% if matrix_bot_buscarron_container_labels_traefik_path_prefix != '/' %} && PathPrefix(`{{ matrix_bot_buscarron_container_labels_traefik_path_prefix }}`){% endif %}"
+matrix_bot_buscarron_container_labels_traefik_metrics_path: "{{ matrix_bot_buscarron_metrics_path }}"
+matrix_bot_buscarron_container_labels_traefik_metrics_rule: "Host(`{{ matrix_bot_buscarron_container_labels_traefik_hostname }}`) && Path(`{{ matrix_bot_buscarron_container_labels_traefik_metrics_path }}`)"
+matrix_bot_buscarron_container_labels_traefik_priority: 0
+matrix_bot_buscarron_container_labels_traefik_entrypoints: web-secure
+matrix_bot_buscarron_container_labels_traefik_tls: "{{ matrix_bot_buscarron_container_labels_traefik_entrypoints != 'web' }}"
+matrix_bot_buscarron_container_labels_traefik_tls_certResolver: default  # noqa var-naming
+
+# Controls which additional headers to attach to all HTTP responses.
+# To add your own headers, use `matrix_bot_buscarron_container_labels_traefik_additional_response_headers_custom`
+matrix_bot_buscarron_container_labels_traefik_additional_response_headers: "{{ matrix_bot_buscarron_container_labels_traefik_additional_response_headers_auto | combine(matrix_bot_buscarron_container_labels_traefik_additional_response_headers_custom) }}"
+matrix_bot_buscarron_container_labels_traefik_additional_response_headers_auto: {}
+matrix_bot_buscarron_container_labels_traefik_additional_response_headers_custom: {}
+
+# matrix_bot_buscarron_container_labels_additional_labels contains a multiline string with additional labels to add to the container label file.
+# See `../templates/labels.j2` for details.
+#
+# Example:
+# matrix_bot_buscarron_container_labels_additional_labels: |
+#   my.label=1
+#   another.label="here"
+matrix_bot_buscarron_container_labels_additional_labels: ''
+
 # A list of extra arguments to pass to the container
 matrix_bot_buscarron_container_extra_arguments: []
 
 # List of systemd services that matrix-bot-buscarron.service depends on
-matrix_bot_buscarron_systemd_required_services_list: ['docker.service']
+matrix_bot_buscarron_systemd_required_services_list: "{{ matrix_bot_buscarron_systemd_required_services_list_default + matrix_bot_buscarron_systemd_required_services_list_auto + matrix_bot_buscarron_systemd_required_services_list_custom }}"
+matrix_bot_buscarron_systemd_required_services_list_default: "{{ [devture_systemd_docker_base_docker_service_name] if devture_systemd_docker_base_docker_service_name else [] }}"
+matrix_bot_buscarron_systemd_required_services_list_auto: []
+matrix_bot_buscarron_systemd_required_services_list_custom: []
 
 # List of systemd services that matrix-bot-buscarron.service wants
 matrix_bot_buscarron_systemd_wanted_services_list: []
@@ -46,8 +124,9 @@ matrix_bot_buscarron_database_password: 'some-password'
 matrix_bot_buscarron_database_hostname: ''
 matrix_bot_buscarron_database_port: 5432
 matrix_bot_buscarron_database_name: 'buscarron'
+matrix_bot_buscarron_database_sslmode: disable
 
-matrix_bot_buscarron_database_connection_string: 'postgres://{{ matrix_bot_buscarron_database_username }}:{{ matrix_bot_buscarron_database_password }}@{{ matrix_bot_buscarron_database_hostname }}:{{ matrix_bot_buscarron_database_port }}/{{ matrix_bot_buscarron_database_name }}?sslmode=disable'
+matrix_bot_buscarron_database_connection_string: 'postgres://{{ matrix_bot_buscarron_database_username }}:{{ matrix_bot_buscarron_database_password }}@{{ matrix_bot_buscarron_database_hostname }}:{{ matrix_bot_buscarron_database_port }}/{{ matrix_bot_buscarron_database_name }}?sslmode={{ matrix_bot_buscarron_database_sslmode }}'
 
 matrix_bot_buscarron_storage_database: "{{
 	{
@@ -72,13 +151,10 @@ matrix_bot_buscarron_login: "bot.buscarron"
 matrix_bot_buscarron_password: ''
 
 # the homeserver URL, uses internal synapse container address by default
-matrix_bot_buscarron_homeserver: "{{ matrix_homeserver_container_url }}"
+matrix_bot_buscarron_homeserver: ""
 
 # forms configuration
 matrix_bot_buscarron_forms: []
-
-# Disable encryption
-matrix_bot_buscarron_noencryption: false
 
 # Sentry DSN
 matrix_bot_buscarron_sentry: ''
@@ -88,18 +164,6 @@ matrix_bot_buscarron_loglevel: INFO
 
 # list of spammers with wildcards support, eg: *@spam.com spam@*, spam@spam.com
 matrix_bot_buscarron_spamlist: []
-
-# spam hosts/domains.
-# deprecated, use matrix_bot_buscarron_spamlist
-matrix_bot_buscarron_spam_hosts: []
-
-# spam email addresses
-# deprecated, use matrix_bot_buscarron_spamlist
-matrix_bot_buscarron_spam_emails: []
-
-# spam email localparts
-# deprecated, use matrix_bot_buscarron_spamlist
-matrix_bot_buscarron_spam_localparts: []
 
 # Banlist size
 matrix_bot_buscarron_ban_size: 10000
@@ -122,7 +186,7 @@ matrix_bot_buscarron_smtp_from: ''
 # enforce SMTP validation
 matrix_bot_buscarron_smtp_validation: false
 
-# Additional environment variables to pass to the buscarron container
+# Additional environment variables to pass to the Buscarron container
 #
 # Example:
 # matrix_bot_buscarron_environment_variables_extension: |
