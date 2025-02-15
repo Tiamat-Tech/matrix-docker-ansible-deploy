@@ -1,6 +1,38 @@
 ---
 
-- name: Ensure Matrix Coturn path exists
+- when: matrix_coturn_turn_external_ip_address_auto_detection_enabled | bool
+  block:
+    - name: Fail if enabled, but EchoIP service URL unset
+      when: matrix_coturn_turn_external_ip_address_auto_detection_echoip_service_url == ''
+      ansible.builtin.fail:
+        msg: "To use the external IP address auto-detection feature, you need to set matrix_coturn_turn_external_ip_address_auto_detection_echoip_service_url"
+
+    # Note:
+    # `ansible.builtin.uri` does not provide a way to configure whether IPv4 or IPv6 is used.
+    # Luckily, the default instance we use does not define AAAA records for now, so it's always IPv4.
+    - name: Fetch IP address information from EchoIP service
+      ansible.builtin.uri:
+        url: "{{ matrix_coturn_turn_external_ip_address_auto_detection_echoip_service_url }}"
+        headers:
+          Content-Type: application/json
+        follow_redirects: none
+        validate_certs: "{{ matrix_coturn_turn_external_ip_address_auto_detection_echoip_validate_certs }}"
+      register: result_matrix_coturn_turn_external_ip_address_auto_detection_echoip_response
+      ignore_errors: true
+      check_mode: false
+      retries: "{{ matrix_coturn_turn_external_ip_address_auto_detection_echoip_service_retries_count }}"
+      delay: "{{ matrix_coturn_turn_external_ip_address_auto_detection_echoip_service_retries_delay }}"
+      until: not result_matrix_coturn_turn_external_ip_address_auto_detection_echoip_response.failed
+
+    - name: Fail if EchoIP service failed
+      when: "(result_matrix_coturn_turn_external_ip_address_auto_detection_echoip_response.failed or 'json' not in result_matrix_coturn_turn_external_ip_address_auto_detection_echoip_response)"
+      ansible.builtin.fail:
+        msg: "Failed contacting EchoIP service API at `{{ matrix_coturn_turn_external_ip_address_auto_detection_echoip_service_url }}` (controlled by `matrix_coturn_turn_external_ip_address_auto_detection_echoip_service_url`). Full error: {{ result_matrix_coturn_turn_external_ip_address_auto_detection_echoip_response }}"
+
+    - ansible.builtin.set_fact:
+        matrix_coturn_turn_external_ip_address: "{{ result_matrix_coturn_turn_external_ip_address_auto_detection_echoip_response.json.ip }}"
+
+- name: Ensure Matrix coturn path exists
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
@@ -11,7 +43,7 @@
     - {path: "{{ matrix_coturn_docker_src_files_path }}", when: "{{ matrix_coturn_container_image_self_build }}"}
   when: "item.when | bool"
 
-- name: Ensure Coturn image is pulled
+- name: Ensure coturn image is pulled
   community.docker.docker_image:
     name: "{{ matrix_coturn_docker_image }}"
     source: "{{ 'pull' if ansible_version.major > 2 or ansible_version.minor > 7 else omit }}"
@@ -25,7 +57,7 @@
 
 - when: "matrix_coturn_container_image_self_build | bool"
   block:
-    - name: Ensure Coturn repository is present on self-build
+    - name: Ensure coturn repository is present on self-build
       ansible.builtin.git:
         repo: "{{ matrix_coturn_container_image_self_build_repo }}"
         dest: "{{ matrix_coturn_docker_src_files_path }}"
@@ -35,7 +67,7 @@
       become_user: "{{ matrix_user_username }}"
       register: matrix_coturn_git_pull_results
 
-    - name: Ensure Coturn Docker image is built
+    - name: Ensure coturn Docker image is built
       community.docker.docker_image:
         name: "{{ matrix_coturn_docker_image }}"
         source: build
@@ -46,7 +78,7 @@
           path: "{{ matrix_coturn_docker_src_files_path }}"
           pull: true
 
-- name: Ensure Coturn configuration path exists
+- name: Ensure coturn configuration path exists
   ansible.builtin.file:
     path: "{{ matrix_coturn_base_path }}"
     state: directory
@@ -62,18 +94,18 @@
     owner: "{{ matrix_user_username }}"
     group: "{{ matrix_user_groupname }}"
 
-- when: matrix_coturn_docker_network not in ['', 'host']
-  name: Ensure Coturn network is created in Docker
+- name: Ensure coturn network is created in Docker
+  when: matrix_coturn_container_network not in ['', 'host']
   community.docker.docker_network:
-    name: "{{ matrix_coturn_docker_network }}"
+    name: "{{ matrix_coturn_container_network }}"
     driver: bridge
+    driver_options: "{{ devture_systemd_docker_base_container_networks_driver_options }}"
 
 - name: Ensure matrix-coturn.service installed
   ansible.builtin.template:
     src: "{{ role_path }}/templates/systemd/matrix-coturn.service.j2"
     dest: "{{ devture_systemd_docker_base_systemd_path }}/matrix-coturn.service"
     mode: 0644
-  register: matrix_coturn_systemd_service_change_results
 
 # This may be unnecessary when more long-lived certificates are used.
 # We optimize for the common use-case though (short-lived Let's Encrypt certificates).
@@ -83,7 +115,6 @@
     src: "{{ role_path }}/templates/systemd/{{ item }}.j2"
     dest: "{{ devture_systemd_docker_base_systemd_path }}/{{ item }}"
     mode: 0644
-  register: "matrix_coturn_systemd_service_change_results"
   when: "matrix_coturn_tls_enabled | bool"
   with_items:
     - matrix-coturn-reload.service
@@ -94,13 +125,7 @@
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
-  register: "matrix_coturn_systemd_service_change_results"
   when: "not matrix_coturn_tls_enabled | bool"
   with_items:
     - matrix-coturn-reload.service
     - matrix-coturn-reload.timer
-
-- name: Ensure systemd reloaded if systemd units changed
-  ansible.builtin.service:
-    daemon_reload: true
-  when: "matrix_coturn_systemd_service_change_results.changed"
