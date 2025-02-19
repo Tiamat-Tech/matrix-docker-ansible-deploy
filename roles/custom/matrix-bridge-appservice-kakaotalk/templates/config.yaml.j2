@@ -220,13 +220,13 @@ bridge:
     relay:
         # Whether relay mode should be allowed. If allowed, `!kt set-relay` can be used to turn any
         # authenticated user into a relaybot for that chat.
-        enabled: false
+        enabled: {{ matrix_appservice_kakaotalk_bridge_relay_enabled }}
         # The formats to use when sending messages to KakaoTalk via a relay user.
         #
         # Available variables:
         #   $sender_displayname - The display name of the sender (e.g. Example User)
-        #   $sender_username    - The username (Matrix ID localpart) of the sender (e.g. exampleuser)
-        #   $sender_mxid        - The Matrix ID of the sender (e.g. @exampleuser:example.com)
+        #   $sender_username    - The username (Matrix ID localpart) of the sender (e.g. alice)
+        #   $sender_mxid        - The Matrix ID of the sender (e.g. @alice:example.com)
         #   $message            - The message content
         message_formats:
             m.text: '<b>$sender_displayname</b>: $message'
