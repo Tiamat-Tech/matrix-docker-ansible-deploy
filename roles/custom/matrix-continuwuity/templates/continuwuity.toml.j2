@@ -586,7 +586,7 @@ trusted_servers = {{ matrix_continuwuity_trusted_servers | to_json }}
 # specifically on room joins. This option limits the exposure to a
 # compromised trusted server to room joins only. The join operation
 # requires gathering keys from many origin servers which can cause
-# significant delays. Therefor this defaults to true to mitigate
+# significant delays. Therefore this defaults to true to mitigate
 # unexpected delays out-of-the-box. The security-paranoid or those willing
 # to tolerate delays are advised to set this to false. Note that setting
 # query_trusted_key_servers_first to true causes this option to be
@@ -597,7 +597,7 @@ trusted_servers = {{ matrix_continuwuity_trusted_servers | to_json }}
 # Only query trusted servers for keys and never the origin server. This is
 # intended for clusters or custom deployments using their trusted_servers
 # as forwarding-agents to cache and deduplicate requests. Notary servers
-# do not act as forwarding-agents by default, therefor do not enable this
+# do not act as forwarding-agents by default, therefore do not enable this
 # unless you know exactly what you are doing.
 #
 #only_query_trusted_key_servers = false
@@ -1164,13 +1164,13 @@ emergency_password = {{ matrix_continuwuity_config_emergency_password | to_json 
 #
 # Basically "global" ACLs.
 #
-#forbidden_remote_server_names = []
+forbidden_remote_server_names = {{ matrix_continuwuity_forbidden_remote_server_names | to_json }}
 
 # List of forbidden server names that we will block all outgoing federated
 # room directory requests for. Useful for preventing our users from
 # wandering into bad servers or spaces.
 #
-#forbidden_remote_room_directory_server_names = []
+forbidden_remote_room_directory_server_names = {{ matrix_continuwuity_forbidden_remote_room_directory_server_names | to_json }}
 
 # Vector list of IPv4 and IPv6 CIDR ranges / subnets *in quotes* that you
 # do not want continuwuity to send outbound requests to. Defaults to
